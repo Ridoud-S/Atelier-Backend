@@ -1,0 +1,225 @@
+%% Atelier V1 - Entity Relationship Diagram (Mermaid)
+%% Notation: PK primary key, FK foreign key, UK unique.
+%% Every user-owned table also carries user_id; "same owner" is enforced with
+%% composite foreign keys (child_id, user_id) -> parent(id, user_id).
+erDiagram
+    profiles ||--|| user_settings : "has"
+    profiles ||--|| user_game_profiles : "has"
+    profiles ||--o{ habits : "owns"
+    profiles ||--o{ projects : "owns"
+    profiles ||--o{ tasks : "owns"
+    profiles ||--o{ assessments : "answers"
+    profiles ||--o{ improvement_plans : "follows"
+    profiles ||--o{ xp_transactions : "earns"
+
+    habit_templates ||--o{ habits : "optional source"
+    habit_templates ||--o{ missions : "instantiated as"
+
+    habits ||--|{ habit_versions : "versioned by"
+    habit_versions ||--o{ habit_version_days : "weekdays"
+    habits ||--o{ habit_logs : "recorded in"
+    habit_versions ||--o{ habit_logs : "interprets"
+
+    projects |o--o{ tasks : "groups"
+    tasks ||--o{ task_checklist_items : "has"
+
+    assessment_versions ||--|{ assessment_questions : "defines"
+    assessment_versions ||--o{ assessments : "used by"
+    assessments ||--o{ assessment_answers : "contains"
+    assessment_questions ||--o{ assessment_answers : "answered by"
+    assessments ||--o| improvement_plans : "generates"
+    improvement_plans ||--o{ missions : "assigns"
+    improvement_plans ||--o{ weekly_reviews : "reviewed in"
+    missions ||--o{ mission_logs : "recorded in"
+    missions |o--o| missions : "adapted from"
+
+    xp_rules ||--o{ xp_transactions : "valued by"
+    habit_logs ||--o| xp_transactions : "rewards once"
+    mission_logs ||--o| xp_transactions : "rewards once"
+    tasks ||--o| xp_transactions : "rewards once"
+
+    profiles {
+        uuid id PK "= Supabase auth user id"
+        varchar display_name
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    user_settings {
+        uuid user_id PK, FK
+        varchar timezone
+        varchar language
+        varchar theme
+        smallint week_start_day "1=Mon..7=Sun"
+        varchar time_format
+        boolean notifications_enabled
+        time daily_reminder_time
+    }
+    user_game_profiles {
+        uuid user_id PK, FK
+        bigint total_xp "cache, rebuildable from xp_transactions"
+    }
+
+    habit_templates {
+        uuid id PK
+        varchar code UK "with version"
+        int version UK
+        varchar category
+        varchar goal_type
+        numeric target_value
+        varchar unit
+        smallint default_weekly_target_count
+        smallint difficulty
+        boolean is_active
+    }
+    habits {
+        uuid id PK
+        uuid user_id FK
+        varchar name
+        varchar category
+        varchar origin "user | system"
+        uuid source_template_id FK
+        date end_date
+        varchar status "active | archived"
+        timestamptz archived_at
+    }
+    habit_versions {
+        uuid id PK
+        uuid habit_id FK
+        date effective_from UK "with habit_id"
+        varchar goal_type
+        numeric target_value
+        varchar unit
+        varchar frequency_type
+        smallint weekly_target_count
+    }
+    habit_version_days {
+        uuid habit_version_id PK, FK
+        smallint weekday PK "ISO 1..7"
+    }
+    habit_logs {
+        uuid id PK
+        uuid user_id FK
+        uuid habit_id FK, UK
+        uuid habit_version_id FK
+        date occurrence_date UK "local date"
+        varchar status "completed | partial | skipped"
+        numeric value
+    }
+
+    projects {
+        uuid id PK
+        uuid user_id FK
+        varchar name
+        varchar status "active | completed | archived"
+        timestamptz archived_at
+    }
+    tasks {
+        uuid id PK
+        uuid user_id FK
+        uuid project_id FK "nullable"
+        varchar title
+        varchar priority
+        varchar status
+        date scheduled_date
+        date due_date
+        timestamptz completed_at
+    }
+    task_checklist_items {
+        uuid id PK
+        uuid task_id FK
+        varchar title
+        boolean is_done
+        int position UK "with task_id, deferrable"
+    }
+
+    assessment_versions {
+        uuid id PK
+        int version UK
+        boolean is_active "only one true"
+    }
+    assessment_questions {
+        uuid id PK
+        uuid assessment_version_id FK
+        varchar question_key UK "with version"
+        varchar domain
+        varchar answer_type
+        jsonb options
+        int position
+    }
+    assessments {
+        uuid id PK
+        uuid user_id FK
+        uuid assessment_version_id FK
+        varchar status
+        timestamptz started_at
+        timestamptz completed_at
+    }
+    assessment_answers {
+        uuid id PK
+        uuid user_id FK
+        uuid assessment_id FK, UK
+        uuid assessment_version_id FK
+        uuid question_id FK, UK
+        numeric value_number
+        text value_text
+        jsonb value_options
+    }
+    improvement_plans {
+        uuid id PK
+        uuid user_id FK
+        uuid assessment_id FK, UK
+        varchar status
+        date started_on
+        date ended_on
+    }
+    missions {
+        uuid id PK
+        uuid user_id FK
+        uuid plan_id FK
+        uuid habit_template_id FK
+        date week_start UK "with plan and template"
+        smallint weekly_target_count
+        numeric target_value
+        varchar unit
+        varchar status
+        uuid adapted_from_mission_id FK
+    }
+    mission_logs {
+        uuid id PK
+        uuid user_id FK
+        uuid mission_id FK, UK
+        date occurrence_date UK
+        varchar status
+        numeric value
+        smallint perceived_difficulty
+    }
+    weekly_reviews {
+        uuid id PK
+        uuid user_id FK
+        uuid plan_id FK, UK
+        date week_start UK
+        smallint perceived_difficulty
+        smallint energy_level
+        text notes
+    }
+
+    xp_rules {
+        uuid id PK
+        varchar rule_code UK "with effective_from"
+        date effective_from UK
+        varchar source_type
+        int xp_amount
+        int daily_cap
+    }
+    xp_transactions {
+        uuid id PK
+        uuid user_id FK
+        uuid xp_rule_id FK
+        varchar event_type "completion"
+        uuid habit_log_id FK, UK
+        uuid mission_log_id FK, UK
+        uuid task_id FK, UK
+        int amount "append-only, >= 0"
+        date award_date "local date, for daily caps"
+        varchar idempotency_key UK "with user_id"
+    }
